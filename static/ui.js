@@ -295,6 +295,98 @@ function SessionManager() {
   `;
 }
 
+// ── Games tab ────────────────────────────────────────────────────────────────
+const GAMES = [
+	{ name: "1v1.lol", url: "https://1v1.lol", icon: "🎮" },
+	{ name: "Slope", url: "https://slope.io", icon: "⛷" },
+	{ name: "Retro Bowl", url: "https://retrobowl.me", icon: "🏈" },
+	{ name: "Cookie Clicker", url: "https://orteil.dashnet.org/cookieclicker/", icon: "🍪" },
+	{ name: "Krunker.io", url: "https://krunker.io", icon: "🎯" },
+	{ name: "Shell Shockers", url: "https://shellshock.io", icon: "🥚" },
+	{ name: "Bloxd.io", url: "https://bloxd.io", icon: "🧱" },
+	{ name: "Paper.io 2", url: "https://paper-io.com", icon: "📄" },
+	{ name: "Smash Karts", url: "https://smashkarts.io", icon: "🚗" },
+	{ name: "Minecraft Classic", url: "https://classic.minecraft.net", icon: "⛏" },
+	{ name: "Tetris", url: "https://tetris.com/play-tetris", icon: "🟦" },
+	{ name: "2048", url: "https://play2048.co", icon: "🔢" },
+	{ name: "Flappy Bird", url: "https://flappybird.io", icon: "🐦" },
+	{ name: "Minesweeper", url: "https://minesweeper.online", icon: "💣" },
+	{ name: "Agar.io", url: "https://agar.io", icon: "🫧" },
+	{ name: "Slither.io", url: "https://slither.io", icon: "🐍" },
+	{ name: "Wordle", url: "https://www.nytimes.com/games/wordle/index.html", icon: "🟩" },
+	{ name: "Chess.com", url: "https://chess.com", icon: "♟" },
+	{ name: "Skribbl.io", url: "https://skribbl.io", icon: "✏️" },
+	{ name: "Geoguessr", url: "https://www.geoguessr.com", icon: "🌍" },
+];
+
+function Games({ onPlay }) {
+	this.css = `
+    padding: 1em;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+    .games-header {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 0.85em;
+    }
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 0.65em;
+    }
+    .game-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35em;
+      padding: 0.85em 0.5em;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 0.75em;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.82rem;
+      text-align: center;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .game-card:hover {
+      background: rgba(76,139,245,0.18);
+      border-color: rgba(76,139,245,0.45);
+    }
+    .game-icon {
+      font-size: 1.6rem;
+      line-height: 1;
+    }
+    .game-name {
+      color: rgba(255,255,255,0.8);
+      font-size: 0.78rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+  `;
+
+	return html`
+    <div>
+      <div class="games-header">🎮 Games</div>
+      <div class="games-grid">
+        ${GAMES.map(
+					(game) => html`
+          <button class="game-card" on:click=${() => onPlay(game.url)}>
+            <span class="game-icon">${game.icon}</span>
+            <span class="game-name">${game.name}</span>
+          </button>
+        `
+				)}
+      </div>
+    </div>
+  `;
+}
+
 // ── Main browser app ─────────────────────────────────────────────────────────
 function BrowserApp() {
 	this.css = `
@@ -384,7 +476,7 @@ function BrowserApp() {
   `;
 
 	this.url = store.url;
-	this.activeTab = "browser"; // "browser" | "sessions"
+	this.activeTab = "browser"; // "browser" | "sessions" | "games"
 
 	const frame = scramjet.createFrame();
 
@@ -439,6 +531,11 @@ function BrowserApp() {
           on:click=${() => { this.activeTab = this.activeTab === "sessions" ? "browser" : "sessions"; }}
         >🍪 Sessions</button>
 
+        <button
+          class=${use(this.activeTab, (t) => "nav-btn" + (t === "games" ? " active-tab" : ""))}
+          on:click=${() => { this.activeTab = this.activeTab === "games" ? "browser" : "games"; }}
+        >🎮 Games</button>
+
         <!-- Panic button -->
         <button class="nav-btn panic" on:click=${panic} title="Clear all cookies, cache, and storage">🗑 Panic</button>
 
@@ -450,11 +547,19 @@ function BrowserApp() {
 
       <!-- Tab content -->
       <div class="tab-content">
-        ${use(this.activeTab, (tab) =>
-					tab === "sessions"
-						? html`<div class="session-panel">${h(SessionManager)}</div>`
-						: frame.frame
-				)}
+        ${use(this.activeTab, (tab) => {
+					if (tab === "sessions") return html`<div class="session-panel">${h(SessionManager)}</div>`;
+					if (tab === "games")
+						return html`<div class="session-panel">${h(Games, {
+							onPlay: (url) => {
+								this.url = url;
+								store.url = url;
+								this.activeTab = "browser";
+								frame.go(url);
+							},
+						})}</div>`;
+					return frame.frame;
+				})}
       </div>
     </div>
   `;
