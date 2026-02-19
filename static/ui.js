@@ -41,10 +41,20 @@ document.addEventListener("visibilitychange", () => {
 	}
 });
 
+// ── Auth token (Supabase session) ────────────────────────────────────────────
+/** Bearer token for the current Supabase session (null = not logged in). */
+let _authToken = localStorage.getItem("sj_auth_token") ?? null;
+
+function authHeaders() {
+	if (!_authToken) return {};
+
+	return { Authorization: `Bearer ${_authToken}` };
+}
+
 // ── Session Manager helpers ─────────────────────────────────────────────────
 async function fetchCookies() {
 	try {
-		const res = await fetch("/api/cookies");
+		const res = await fetch("/api/cookies", { headers: authHeaders() });
 
 		return await res.json();
 	} catch {
@@ -55,17 +65,18 @@ async function fetchCookies() {
 async function deleteCookie(domain, name) {
 	await fetch(
 		`/api/cookies/${encodeURIComponent(domain)}/${encodeURIComponent(name)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE", headers: authHeaders() }
 	);
 }
 
 async function clearAllCookies() {
-	await fetch("/api/cookies", { method: "DELETE" });
+	await fetch("/api/cookies", { method: "DELETE", headers: authHeaders() });
 }
 
 // ── Panic ────────────────────────────────────────────────────────────────────
 async function panic() {
 	await clearAllCookies();
+	_authToken = null;
 	localStorage.clear();
 	sessionStorage.clear();
 	if ("caches" in self) {
@@ -75,6 +86,255 @@ async function panic() {
 	const regs = await navigator.serviceWorker.getRegistrations();
 	await Promise.all(regs.map((r) => r.unregister()));
 	location.reload();
+}
+
+// ── Account Management (Supabase) ────────────────────────────────────────────
+function AccountPanel() {
+	this.view = "idle"; // "idle" | "login" | "register" | "loggedIn"
+	this.email = "";
+	this.password = "";
+	this.error = "";
+	this.userId = "";
+
+	this.mount = async () => {
+		if (!_authToken) {
+			this.view = "idle";
+
+			return;
+		}
+		try {
+			const res = await fetch("/api/auth/me", { headers: authHeaders() });
+			if (res.ok) {
+				const { userId } = await res.json();
+				this.userId = userId;
+				this.view = "loggedIn";
+			} else {
+				_authToken = null;
+				localStorage.removeItem("sj_auth_token");
+				this.view = "idle";
+			}
+		} catch {
+			this.view = "idle";
+		}
+	};
+
+	const doLogin = async () => {
+		this.error = "";
+		try {
+			const res = await fetch("/api/auth/login", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ email: this.email, password: this.password }),
+			});
+			const data = await res.json();
+			if (!res.ok) {
+				this.error = data.error ?? "Login failed";
+
+				return;
+			}
+			_authToken = data.accessToken;
+			localStorage.setItem("sj_auth_token", _authToken);
+			this.userId = data.userId;
+			this.view = "loggedIn";
+			this.password = "";
+		} catch {
+			this.error = "Network error";
+		}
+	};
+
+	const doRegister = async () => {
+		this.error = "";
+		try {
+			const res = await fetch("/api/auth/register", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ email: this.email, password: this.password }),
+			});
+			const data = await res.json();
+			if (!res.ok) {
+				this.error = data.error ?? "Registration failed";
+
+				return;
+			}
+			if (data.accessToken) {
+				_authToken = data.accessToken;
+				localStorage.setItem("sj_auth_token", _authToken);
+				this.userId = data.userId;
+				this.view = "loggedIn";
+			} else {
+				this.error = "Check your email to confirm your account, then log in.";
+				this.view = "idle";
+			}
+			this.password = "";
+		} catch {
+			this.error = "Network error";
+		}
+	};
+
+	const doLogout = () => {
+		_authToken = null;
+		localStorage.removeItem("sj_auth_token");
+		this.userId = "";
+		this.view = "idle";
+	};
+
+	this.css = `
+    overflow-y: auto; height: 100%;
+    padding: 1.5em 1.75em; box-sizing: border-box;
+    animation: slideUp 0.25s ease;
+    .ap-title {
+      font-size: 1.1rem; font-weight: 700; letter-spacing:-0.02em;
+      background: linear-gradient(90deg,#c4b5fd,#818cf8);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      margin-bottom: 1.25em;
+    }
+    .ap-card {
+      max-width: 400px; margin: 1em auto;
+      background: rgba(124,58,237,0.06);
+      border: 1px solid rgba(139,92,246,0.2);
+      border-radius: 16px; padding: 1.5em;
+    }
+    .ap-desc {
+      font-size: 0.82rem; color: rgba(255,255,255,0.45);
+      margin-bottom: 1em; line-height: 1.55;
+    }
+    .ap-input {
+      width: 100%; box-sizing: border-box;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 0.6em; color: #fff;
+      padding: 0.45em 0.75em; font-size: 0.88rem;
+      margin-bottom: 0.6em; outline: none;
+      transition: border-color 0.15s;
+    }
+    .ap-input:focus { border-color: rgba(139,92,246,0.6); }
+    .ap-btn {
+      width: 100%; padding: 0.5em;
+      border-radius: 0.65em;
+      border: 1px solid rgba(139,92,246,0.4);
+      background: rgba(124,58,237,0.15);
+      color: #a78bfa; cursor: pointer; font-size: 0.88rem;
+      margin-bottom: 0.4em;
+      transition: background 0.13s;
+    }
+    .ap-btn:hover { background: rgba(124,58,237,0.28); }
+    .ap-btn.danger {
+      border-color: rgba(239,68,68,0.35);
+      background: rgba(239,68,68,0.1); color: #f87171;
+    }
+    .ap-btn.danger:hover { background: rgba(239,68,68,0.22); }
+    .ap-link {
+      font-size: 0.78rem; color: rgba(255,255,255,0.38);
+      cursor: pointer; text-decoration: underline;
+      margin-top: 0.3em; display: inline-block;
+    }
+    .ap-error { color: #f87171; font-size: 0.8rem; margin-bottom: 0.6em; }
+    .ap-info {
+      font-size: 0.8rem; color: rgba(255,255,255,0.45);
+      word-break: break-all; margin-bottom: 0.75em; line-height: 1.5;
+    }
+  `;
+
+	return html`
+		<div>
+			<div class="ap-title">👤 Account</div>
+			<div class="ap-card">
+				${use(this.view, (view) => {
+					if (view === "loggedIn") {
+						return html`
+							<div class="ap-info">
+								Logged in — your cookies are synced to your account and will be
+								available next time you log in.
+							</div>
+							<div
+								class="ap-info"
+								style="font-size:0.7rem;color:rgba(255,255,255,0.25);"
+							>
+								User ID: ${use(this.userId)}
+							</div>
+							<button class="ap-btn danger" on:click=${doLogout}>
+								Log out
+							</button>
+						`;
+					}
+					if (view === "register") {
+						return html`
+							${use(this.error, (e) =>
+								e ? html`<div class="ap-error">${e}</div>` : ""
+							)}
+							<input
+								class="ap-input"
+								type="email"
+								placeholder="Email"
+								bind:value=${use(this.email)}
+								on:input=${(e) => {
+									this.email = e.target.value;
+								}}
+							/>
+							<input
+								class="ap-input"
+								type="password"
+								placeholder="Password"
+								bind:value=${use(this.password)}
+								on:input=${(e) => {
+									this.password = e.target.value;
+								}}
+								on:keyup=${(e) => e.key === "Enter" && doRegister()}
+							/>
+							<button class="ap-btn" on:click=${doRegister}>
+								Create account
+							</button>
+							<span
+								class="ap-link"
+								on:click=${() => {
+									this.view = "login";
+									this.error = "";
+								}}
+								>← Back to login</span
+							>
+						`;
+					}
+					return html`
+						<div class="ap-desc">
+							Sign in to sync your cookies via Supabase — sessions persist
+							across Codespace restarts.
+						</div>
+						${use(this.error, (e) =>
+							e ? html`<div class="ap-error">${e}</div>` : ""
+						)}
+						<input
+							class="ap-input"
+							type="email"
+							placeholder="Email"
+							bind:value=${use(this.email)}
+							on:input=${(e) => {
+								this.email = e.target.value;
+							}}
+						/>
+						<input
+							class="ap-input"
+							type="password"
+							placeholder="Password"
+							bind:value=${use(this.password)}
+							on:input=${(e) => {
+								this.password = e.target.value;
+							}}
+							on:keyup=${(e) => e.key === "Enter" && doLogin()}
+						/>
+						<button class="ap-btn" on:click=${doLogin}>Log in</button>
+						<span
+							class="ap-link"
+							on:click=${() => {
+								this.view = "register";
+								this.error = "";
+							}}
+							>Don't have an account? Register</span
+						>
+					`;
+				})}
+			</div>
+		</div>
+	`;
 }
 
 // ── Settings dialog ──────────────────────────────────────────────────────────
@@ -879,6 +1139,7 @@ function Dock({ activeView, onSelect }) {
 		{ id: "browser", label: "Browser", icon: "🌐" },
 		{ id: "games", label: "Games", icon: "🎮" },
 		{ id: "sessions", label: "Sessions", icon: "🍪" },
+		{ id: "account", label: "Account", icon: "👤" },
 	];
 
 	this.css = `
@@ -997,7 +1258,8 @@ function BrowserNav({
 	onNavigate,
 	onNewTab,
 }) {
-	this.inputUrl = typeof url === "object" && "value" in url ? url.value : url || "";
+	this.inputUrl =
+		typeof url === "object" && "value" in url ? url.value : url || "";
 
 	const submit = () => {
 		let u = this.inputUrl.trim();
@@ -1163,6 +1425,10 @@ function OSApp() {
 
 					if (view === "sessions") {
 						return html` <div class="panel">${h(SessionManager)}</div> `;
+					}
+
+					if (view === "account") {
+						return html` <div class="panel">${h(AccountPanel)}</div> `;
 					}
 				})}
 			</div>
